@@ -6,8 +6,11 @@ These are one off programs that helped me understand 3D CV as well as implementa
 
 ```
 .
-├── cam_projection_visualizer/              # 
-│   ├── main.cpp                 # main file for visualizing camera position and intrinsic matrix effect on a 3D cube.
+├── 2_camera_estimation/
+│   ├── pipeline.py
+│   ├── output/
+├── cam_projection_visualizer/
+│   ├── main.cpp 
 ```
 
 ### Camera Projection Visualizer
