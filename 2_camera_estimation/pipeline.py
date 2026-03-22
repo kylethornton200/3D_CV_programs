@@ -298,12 +298,10 @@ def seven_point_algorithm(x1: np.ndarray, x2: np.ndarray) -> List[np.ndarray]:
     def det_at(alpha):
         return np.linalg.det(alpha * F1 + (1 - alpha) * F2)
     
-    # Fit cubic c0 + c1*a + c2*a^2 + c3*a^3
-    # Evaluate at 4 points
+
     alphas_sample = np.array([0.0, 1.0, -1.0, 2])
     dets = np.array([det_at(a) for a in alphas_sample])
     
-    # Vandermonde matrix for polynomial fitting
     V = np.column_stack([
         np.ones(4),
         alphas_sample,
@@ -314,7 +312,6 @@ def seven_point_algorithm(x1: np.ndarray, x2: np.ndarray) -> List[np.ndarray]:
     coeffs = np.linalg.solve(V, dets)  # [c0, c1, c2, c3]
     
     # Find roots of the cubic
-    # np.roots expects [c3, c2, c1, c0] (highest degree first)
     poly_coeffs = coeffs[::-1]
     
     if abs(poly_coeffs[0]) < 1e-12:
@@ -376,14 +373,11 @@ def sampson_distance(F: np.ndarray, x1: np.ndarray, x2: np.ndarray) -> np.ndarra
     Fx1 = (F @ x1_hom.T).T       # (N, 3) — lines in image 2
     Ftx2 = (F.T @ x2_hom.T).T    # (N, 3) — lines in image 1
     
-    # Algebraic error
     numerator = np.array([x2_hom[i] @ F @ x1_hom[i] for i in range(N)])
     
-    # Denominator: sum of squared first two components of epipolar lines
     denom = (Fx1[:, 0]**2 + Fx1[:, 1]**2 +
              Ftx2[:, 0]**2 + Ftx2[:, 1]**2)
     
-    # Avoid division by zero
     denom = np.maximum(denom, 1e-12)
 
     return numerator**2 / denom
@@ -448,7 +442,6 @@ def ransac_fundamental(
     best_F = None
     best_inliers = np.zeros(N, dtype=bool)
     
-    # Adaptive RANSAC: update iteration count based on inlier ratio
     max_iter = n_iterations
     
     for i in range(max_iter):
@@ -477,7 +470,6 @@ def ransac_fundamental(
                 best_F = F_candidate.copy()
                 best_inliers = inliers.copy()
                 
-                # Adaptive iteration count (Eq. 4.18 in H&Z)
                 w = n_inliers / N
                 if w > 0:
                     p = 0.999  # desired probability of success
@@ -659,14 +651,12 @@ def recover_pose(
     best_count = 0
     best_R, best_t = None, None
     
-    # Camera 1: P1 = K1 [I | 0]
     P1 = K1 @ np.hstack([np.eye(3), np.zeros((3, 1))])
     
     for R, t in solutions:
-        # Camera 2: P2 = K2 [R | t]
         P2 = K2 @ np.hstack([R, t.reshape(3, 1)])
         
-        # Triangulate a subset of points
+
         n_test = min(x1.shape[0], 50)
         X_test = triangulate_points(P1, P2, x1[:n_test], x2[:n_test])
         
@@ -674,10 +664,8 @@ def recover_pose(
             continue
         
         # Check cheirality: points must be in front of both cameras
-        # In front of camera 1: Z > 0 (since R1 = I, t1 = 0)
         in_front_1 = X_test[:, 2] > 0
         
-        # In front of camera 2: R @ X + t has Z > 0
         X_cam2 = (R @ X_test.T).T + t
         in_front_2 = X_cam2[:, 2] > 0
         
@@ -768,7 +756,7 @@ def triangulate_optimal(
     
     # Project each point onto the other's epipolar line
     # Closest point on line l = (a,b,c) to point (u,v):
-    #   (u - a*(au+bv+c)/(a^2+b^2), v - b*(au+bv+c)/(a^2+b^2))
+    # (u - a*(au+bv+c)/(a^2+b^2), v - b*(au+bv+c)/(a^2+b^2))
     
     def project_to_line(pt, l):
         a, b, c = l
