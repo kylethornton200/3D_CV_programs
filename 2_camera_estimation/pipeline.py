@@ -135,7 +135,7 @@ def add_noise_and_outliers(
     x1_noisy = x1 + rng.randn(n, 2) * noise_std
     x2_noisy = x2 + rng.randn(n, 2) * noise_std
     
-    # Generate outliers (random correspondences)
+    # Generate outliers
     x1_out = rng.rand(n_outliers, 2) * np.array([img_size[0], img_size[1]])
     x2_out = rng.rand(n_outliers, 2) * np.array([img_size[0], img_size[1]])
     
@@ -268,11 +268,9 @@ def seven_point_algorithm(x1: np.ndarray, x2: np.ndarray) -> List[np.ndarray]:
     """
     assert x1.shape[0] == 7, "Need exactly 7 correspondences"
     
-    # Normalize
     x1_norm, T1 = normalize_points(x1)
     x2_norm, T2 = normalize_points(x2)
     
-    # Build A matrix
     u1, v1 = x1_norm[:, 0], x1_norm[:, 1]
     u2, v2 = x2_norm[:, 0], x2_norm[:, 1]
     
@@ -368,8 +366,7 @@ def sampson_distance(F: np.ndarray, x1: np.ndarray, x2: np.ndarray) -> np.ndarra
     x2_hom = np.hstack([x2, np.ones((x2.shape[0], 1))])
     
     N = x1.shape[0]
-    
-    # Epipolar lines
+
     Fx1 = (F @ x1_hom.T).T       # (N, 3) — lines in image 2
     Ftx2 = (F.T @ x2_hom.T).T    # (N, 3) — lines in image 1
     
@@ -445,7 +442,6 @@ def ransac_fundamental(
     max_iter = n_iterations
     
     for i in range(max_iter):
-        # Random sample
         idx = rng.choice(N, sample_size, replace=False)
         
         try:
@@ -782,8 +778,8 @@ def compute_epipoles(F: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the epipoles from F.
     
-    e  = right null space of F  (Fe = 0)
-    e' = left null space of F   (F^T e' = 0)
+    e  = Fe = 0
+    e' = F^T e' = 0
     """
     _, _, Vt = np.linalg.svd(F)
     e = Vt[-1]
@@ -823,15 +819,12 @@ def draw_epipolar_lines(
     for idx, i in enumerate(indices):
         color = colors[idx]
         
-        # Point in image 1 -> epipolar line in image 2
         x1_hom = np.array([x1[i, 0], x1[i, 1], 1.0])
         l2 = F @ x1_hom  # l2 = Fx1
         
-        # Point in image 2 -> epipolar line in image 1
         x2_hom = np.array([x2[i, 0], x2[i, 1], 1.0])
         l1 = F.T @ x2_hom  # l1 = F^T x2
         
-        # Draw line in image 1: l1 = (a, b, c), y = -(ax + c)/b
         def draw_line(ax, l, W, H, color):
             a, b, c = l
             if abs(b) > abs(a):
@@ -842,15 +835,12 @@ def draw_epipolar_lines(
                 x_vals = -(b * y_vals + c) / a
             ax.plot(x_vals, y_vals, color=color, alpha=0.6, linewidth=1)
         
-        # Draw on image 1
         ax1.scatter(x1[i, 0], x1[i, 1], color=color, s=40, zorder=5, edgecolors='k', linewidths=0.5)
         draw_line(ax1, l1, W, H, color)
         
-        # Draw on image 2
         ax2.scatter(x2[i, 0], x2[i, 1], color=color, s=40, zorder=5, edgecolors='k', linewidths=0.5)
         draw_line(ax2, l2, W, H, color)
     
-    # Draw epipoles
     e, e_prime = compute_epipoles(F)
     
     if abs(e[2]) > 1e-10 and 0 <= e[0]/e[2] <= W and 0 <= e[1]/e[2] <= H:
@@ -886,7 +876,6 @@ def draw_matches(
     
     W, H = img_size
     
-    # Draw image boundaries
     rect1 = plt.Rectangle((0, 0), W, H, fill=False, edgecolor='gray', linewidth=2)
     rect2 = plt.Rectangle((W + 20, 0), W, H, fill=False, edgecolor='gray', linewidth=2)
     ax.add_patch(rect1)
@@ -904,7 +893,6 @@ def draw_matches(
                 [x1[i, 1], x2[i, 1]],
                 color=color, alpha=alpha, linewidth=lw)
     
-    # Draw points
     ax.scatter(x1[:, 0], x1[:, 1], c=['lime' if inl else 'red' for inl in inliers],
               s=15, zorder=5, edgecolors='k', linewidths=0.3)
     ax.scatter(x2[:, 0] + offset, x2[:, 1], c=['lime' if inl else 'red' for inl in inliers],
@@ -939,7 +927,6 @@ def plot_3d_reconstruction(
     ax1.scatter(X_true[:, 0], X_true[:, 1], X_true[:, 2],
                c='steelblue', s=10, alpha=0.6, label='3D Points')
     
-    # Draw cameras
     draw_camera(ax1, np.eye(3), np.zeros(3), 'Camera 1 (true)', 'green')
     draw_camera(ax1, R_true, t_true, 'Camera 2 (true)', 'red')
     
@@ -950,8 +937,7 @@ def plot_3d_reconstruction(
     # --- Reconstructed Scene ---
     ax2 = fig.add_subplot(122, projection='3d')
     
-    # Align reconstruction to ground truth for visualization
-    # (reconstruction is up to scale)
+
     if X_reconstructed is not None and len(X_reconstructed) > 0:
         scale = np.median(np.linalg.norm(X_true, axis=1)) / \
                 np.maximum(np.median(np.linalg.norm(X_reconstructed, axis=1)), 1e-10)
@@ -1093,18 +1079,15 @@ def compare_matrices(F1: np.ndarray, F2: np.ndarray, name1: str, name2: str):
         print("  Cannot compare: one matrix is None")
         return
     
-    # Normalize both
     F1_n = F1 / np.linalg.norm(F1)
     F2_n = F2 / np.linalg.norm(F2)
     
-    # F and -F are equivalent
     diff1 = np.linalg.norm(F1_n - F2_n)
     diff2 = np.linalg.norm(F1_n + F2_n)
     diff = min(diff1, diff2)
     
     print(f"  ||{name1} - {name2}|| = {diff:.6f}")
     
-    # Compare singular values
     S1 = np.linalg.svd(F1_n, compute_uv=False)
     S2 = np.linalg.svd(F2_n, compute_uv=False)
     print(f"    Singular values {name1}: [{S1[0]:.6f}, {S1[1]:.6f}, {S1[2]:.2e}]")
