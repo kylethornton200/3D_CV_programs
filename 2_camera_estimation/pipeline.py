@@ -715,7 +715,7 @@ def triangulate_points(
             v2 * P2[2] - P2[1]
         ])
         
-        _, S, Vt = np.linalg.svd(A)
+        _, _, Vt = np.linalg.svd(A)
         X_hom = Vt[-1]
         
         if abs(X_hom[3]) < 1e-10:
