@@ -46,4 +46,4 @@ Another one off program about 3d cv (make sure you have an output dir in the 2_c
 
 ### NEXT: Depth Estimation with Depth Anything V2
 **Goal is seeing how high I can get fps on my GPU using my webcame as the input.**
-Right now in python under the folder `webcam_depth_estimator`.
+Right complete barebones program in python under the folder `webcam_depth_estimator`.
