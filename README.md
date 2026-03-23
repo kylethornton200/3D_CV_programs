@@ -11,6 +11,8 @@ These are one off programs that helped me understand 3D CV as well as implementa
 │   ├── output/
 ├── cam_projection_visualizer/
 │   ├── main.cpp 
+├── webcam_depth_estimator/
+│   ├── reading_webcam.py
 ```
 
 ### Camera Projection Visualizer
@@ -42,5 +44,6 @@ Another one off program about 3d cv (make sure you have an output dir in the 2_c
 2. Pose recover uses noises points for the cheirality test
 3. Limited camera intrinsics and limited to 2 cameras
 
-### NEXT:
-Doing monocular depth estimation of my workspace with depth anything V2. **Goal is seeing how high I can get fps on my GPU using my webcame as the input.**
+### NEXT: Depth Estimation with Depth Anything V2
+**Goal is seeing how high I can get fps on my GPU using my webcame as the input.**
+Right now in python under the folder `webcam_depth_estimator`.
