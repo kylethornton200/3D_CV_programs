@@ -8,4 +8,14 @@ dependencies = [
     "matplotlib>=3.10.8",
     "opencv-python>=4.13.0.92",
     "scipy>=1.17.1",
+    "torch",
+    "torchvision",
+    "transformers",
+    "accelerate",
+    "pillow",
 ]
+
+
+[tool.uv.sources]
+torch = { url = "https://download.pytorch.org/whl/cu128/torch-2.6.0+cu128-cp312-cp312-linux_x86_64.whl" }
+torchvision = { url = "https://download.pytorch.org/whl/cu128/torchvision-0.21.0+cu128-cp312-cp312-linux_x86_64.whl" }
