@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.16)
+project(sophus_attempt LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Eigen3 CONFIG REQUIRED)
+find_package(Sophus CONFIG REQUIRED)
+
+add_executable(sophus_attempt main.cpp)
+target_link_libraries(sophus_attempt PRIVATE Eigen3::Eigen Sophus::Sophus)
+
+if(MSVC)
+  target_compile_options(sophus_attempt PRIVATE /W4)
+  target_compile_definitions(sophus_attempt PRIVATE _USE_MATH_DEFINES)  # makes M_PI available
+else()
+  target_compile_options(sophus_attempt PRIVATE -Wall -Wextra)
+endif()
