@@ -142,6 +142,16 @@ Vector6d logSE3(const Eigen::Matrix4d& T){
     return xi;
 }
 
+using Matrix6d = Eigen::Matrix<double, 6, 6>;
+
+static Matrix6d adjointSE3(const Eigen::Matrix4d& T){
+    const Eigen::Matrix3d C = T.topLeftCorner<3, 3>();
+    const Eigen::Vector3d r = T.topRightCorner<3, 1>();
+    Matrix6d adjT;
+    adjT << C, hat(r)*C, Eigen::Matrix3d::Zero(), C;
+    return adjT;
+}
+
 static Eigen::Vector3d randomPhi(std::mt19937& rng, int i) {
     std::normal_distribution<double> gauss(0.0, 1.0);
     std::uniform_real_distribution<double> angleDist(0.0, M_PI);
@@ -411,6 +421,60 @@ static bool testLogEdgeCasesSE3() {
     return worstRecon < tol && worstPure < tol;
 }
 
+// Analytic SE(3) inverse: [C^T, -C^T r; 0, 1].
+static Eigen::Matrix4d inverseSE3(const Eigen::Matrix4d& T) {
+    Eigen::Matrix4d Ti = Eigen::Matrix4d::Identity();
+    Ti.topLeftCorner<3, 3>()  = T.topLeftCorner<3, 3>().transpose();
+    Ti.topRightCorner<3, 1>() = -T.topLeftCorner<3, 3>().transpose() * T.topRightCorner<3, 1>();
+    return Ti;
+}
+
+static bool testAdjointSE3(std::mt19937& rng) {
+    const int N = 5000;
+    const double tol = 1e-10;       // chained products with O(10) translations
+    const double tolExact = 1e-12;
+
+    double worstConj = 0, worstSophus = 0, worstHomo = 0, worstInv = 0, worstId = 0;
+
+    // Ad(I) = I
+    worstId = (adjointSE3(Eigen::Matrix4d::Identity()) - Matrix6d::Identity()).cwiseAbs().maxCoeff();
+
+    for (int n = 0; n < N; ++n) {
+        const Eigen::Matrix4d T  = expSE3(randomXi(rng, n));
+        const Eigen::Matrix4d T2 = expSE3(randomXi(rng, n + 1));
+        const Vector6d xi = randomXi(rng, n + 2, 1.0);
+
+        const Matrix6d Ad = adjointSE3(T);
+
+        // T exp(xi) T^-1 = exp(Ad(T) xi)
+        const Eigen::Matrix4d lhs = T * expSE3(xi) * inverseSE3(T);
+        const Eigen::Matrix4d rhs = expSE3(Ad * xi);
+        worstConj = std::max(worstConj, (lhs - rhs).cwiseAbs().maxCoeff());
+
+        // Against Sophus's adjoint (same [translation; rotation] ordering).
+        const Sophus::SE3d S(Sophus::SO3d(Eigen::Matrix3d(T.topLeftCorner<3, 3>())),
+                             Eigen::Vector3d(T.topRightCorner<3, 1>()));
+        worstSophus = std::max(worstSophus, (Ad - S.Adj()).cwiseAbs().maxCoeff());
+
+        // Homomorphism: Ad(T T2) = Ad(T) Ad(T2)
+        worstHomo = std::max(worstHomo,
+            (adjointSE3(T * T2) - Ad * adjointSE3(T2)).cwiseAbs().maxCoeff());
+
+        // Ad(T^-1) = Ad(T)^-1
+        worstInv = std::max(worstInv,
+            (adjointSE3(inverseSE3(T)) * Ad - Matrix6d::Identity()).cwiseAbs().maxCoeff());
+    }
+
+    std::cout << "Ad: |T exp(xi) T^-1 - exp(Ad xi)|: " << worstConj   << "\n"
+              << "Ad: |Ad - Ad_sophus|:              " << worstSophus << "\n"
+              << "Ad: |Ad(T T2) - Ad(T) Ad(T2)|:     " << worstHomo   << "\n"
+              << "Ad: |Ad(T^-1) Ad(T) - I|:          " << worstInv    << "\n"
+              << "Ad: |Ad(I) - I|:                   " << worstId     << "\n";
+
+    return worstConj < tol && worstSophus < tolExact && worstHomo < tol
+        && worstInv < tol && worstId == 0.0;
+}
+
 int main() {
     std::mt19937 rng(42);
 
@@ -422,6 +486,7 @@ int main() {
     ok &= testJacobianInverses(rng);
     ok &= testExpLogSE3(rng);
     ok &= testLogEdgeCasesSE3();
+    ok &= testAdjointSE3(rng);
     
     std::cout << (ok ? "PASS" : "FAIL") << std::endl;
     return ok ? 0 : 1;
