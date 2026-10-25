@@ -11,6 +11,9 @@ These are one off programs that helped me understand 3D CV as well as implementa
 │   ├── output/
 ├── cam_projection_visualizer/
 │   ├── main.cpp 
+├── sophus_attempt/
+│   ├── main.cpp
+│   ├── CmakeLists.txt
 ├── webcam_depth_estimator/
 │   ├── reading_webcam.py
 ```
@@ -44,6 +47,33 @@ Another one off program about 3d cv (make sure you have an output dir in the 2_c
 2. Pose recover uses noises points for the cheirality test
 3. Limited camera intrinsics and limited to 2 cameras
 
-### NEXT: Depth Estimation with Depth Anything V2
-**Goal is seeing how high I can get fps on my GPU using my webcame as the input.**
-Right complete barebones program in python under the folder `webcam_depth_estimator`.
+### Sophus Attempt (SO(3) / SE(3) from scratch)
+A from-scratch rewrite of the core Lie group math from [Sophus](https://github.com/strasdat/Sophus), using only Eigen. Sophus is linked in only as a reference to test against.
+
+#### What's implemented
+* `hat`: 3-vector to skew-symmetric matrix.
+* `expSO3` / `logSO3`: Rodrigues' formula for exp. Log goes through a quaternion so it stays stable near θ = 0 and θ = π, and picks w ≥ 0 so θ ∈ [0, π].
+* `leftJacobian` / `rightJacobian` and their inverses, with small-angle fallbacks. J_l uses `2 sin²(θ/2)/θ` instead of `(1 - cos θ)/θ` to avoid cancellation.
+* `expSE3` / `logSE3`: twists are ordered `xi = [rho; phi]` (translation first, rotation second, same as Sophus). The translation is `J_l(phi) * rho`.
+* `adjointSE3`: the 6x6 adjoint `[C, [r]x C; 0, C]`.
+* `inverseSE3`: the analytic inverse `[Cᵀ, -Cᵀr; 0, 1]`.
+
+#### Tests
+`main()` runs every test group with a fixed seed (42), prints the worst error for each check, then prints `PASS`/`FAIL` (exit code 0/1). A failing group doesn't stop the rest from running. Random rotations use angles in [0, π], and every 5th sample uses a tiny angle (1e-12 to 1e-6) to hit the small-angle branches.
+1. **SO(3) exp/log**: exp vs Sophus, orthogonality, det = 1, round trip, log vs Sophus, and `exp(log(R)) = R`.
+2. **SO(3) log edge cases**: θ = 0, 1e-10, π - 1e-6, and π about each axis.
+3. **Jacobians**: J_l and J_r vs central finite differences, plus `J_r = J_lᵀ = J_l(-phi)` and `J_l phi = phi`.
+4. **Jacobian inverses**: `J J⁻¹ = I`, `J_l⁻¹ phi = phi`, and `J_r⁻¹ = (J_l⁻¹)ᵀ`.
+5. **SE(3) exp/log**: rotation, translation and bottom-row checks, round trip, and log vs Sophus. For small angles the translation is checked against a Taylor series instead of Sophus, because Sophus's own `SE3::exp` loses precision for θ ≈ 1e-10 to 1e-5.
+6. **SE(3) log edge cases**: the same edge angles with several translations, plus pure translations (log must give exactly `[t; 0]`).
+7. **Adjoint**: `T exp(xi) T⁻¹ = exp(Ad(T) xi)`, matches Sophus's `Adj()`, `Ad(T T2) = Ad(T) Ad(T2)`, `Ad(T⁻¹) = Ad(T)⁻¹`, and `Ad(I) = I`.
+
+Tolerances: 1e-12 for SO(3), 1e-11 for SE(3) (translations are O(10)), 1e-10 for the chained adjoint products, and 1e-9 for finite differences.
+
+#### Building
+Needs Eigen3 and Sophus findable by CMake (`find_package(... CONFIG)`), e.g. through vcpkg.
+```
+cmake -S sophus_attempt -B sophus_attempt/build
+cmake --build sophus_attempt/build
+```
+
