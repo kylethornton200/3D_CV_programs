@@ -1,6 +1,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <sophus/so3.hpp>
+#include <sophus/se3.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -65,21 +66,80 @@ Eigen::Vector3d logSO3(const Eigen::Matrix3d& C) {
     }
     return factor * V;
 }
-
 Eigen::Matrix3d leftJacobian(const Eigen::Vector3d& phi) {
     const double theta = phi.norm();
     if (theta < 1e-8) {
         return Eigen::Matrix3d::Identity() + 0.5 * hat(phi);
     }
     const Eigen::Vector3d a = phi / theta;
-    const double s = std::sin(theta) / theta;
+    const double s  = std::sin(theta) / theta;
+    const double sh = std::sin(0.5 * theta);
+    const double c  = 2.0 * sh * sh / theta;      // attempt to fix problems arising in the inverse tests.
     return s * Eigen::Matrix3d::Identity()
          + (1.0 - s) * a * a.transpose()
-         + ((1.0 - std::cos(theta)) / theta) * hat(a);
+         + c * hat(a);
 }
+
+// Eigen::Matrix3d leftJacobian(const Eigen::Vector3d& phi) {
+//     const double theta = phi.norm();
+//     if (theta < 1e-8) {
+//         return Eigen::Matrix3d::Identity() + 0.5 * hat(phi);
+//     }
+//     const Eigen::Vector3d a = phi / theta;
+//     const double s = std::sin(theta) / theta;
+//     return s * Eigen::Matrix3d::Identity()
+//          + (1.0 - s) * a * a.transpose()
+//          + ((1.0 - std::cos(theta)) / theta) * hat(a);
+// }
 
 Eigen::Matrix3d rightJacobian(const Eigen::Vector3d& phi) {
     return leftJacobian(-phi);        // equivalently leftJacobian(phi).transpose()
+}
+
+double cot(double x) {
+    return 1.0 / std::tan(x);
+}
+
+Eigen::Matrix3d leftJacobianInverse(const Eigen::Vector3d& phi) {
+    const double theta = phi.norm();
+    if (theta < 1e-8) {
+        return Eigen::Matrix3d::Identity() - 0.5 * hat(phi);
+    }
+    const Eigen::Vector3d a = phi / theta;
+    const double half = 0.5 * theta;
+    const double c = half / std::tan(half);
+    return c * Eigen::Matrix3d::Identity()
+         + (1.0 - c) * a * a.transpose()
+         - half * hat(a);
+}
+
+Eigen::Matrix3d rightJacobianInverse(const Eigen::Vector3d& phi) {
+    return leftJacobianInverse(-phi);
+}
+
+using Vector6d = Eigen::Matrix<double, 6, 1>;
+
+// xi = [rho; phi]: translation part first, rotation vector second.
+Eigen::Matrix4d expSE3(const Vector6d& xi) {
+    const Eigen::Vector3d rho = xi.head<3>();
+    const Eigen::Vector3d phi = xi.tail<3>();
+
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    T.topLeftCorner<3, 3>()  = expSO3(phi);
+    T.topRightCorner<3, 1>() = leftJacobian(phi) * rho;
+    return T;
+}
+
+Vector6d logSE3(const Eigen::Matrix4d& T){
+    const Eigen::Matrix3d C = T.topLeftCorner<3, 3>();
+    const Eigen::Vector3d r = T.topRightCorner<3, 1>();
+
+    Eigen::Vector3d phi = logSO3(C);
+    Eigen::Vector3d rho = leftJacobianInverse(phi) * r;
+
+    Vector6d xi;
+    xi << rho,  phi;
+    return xi;
 }
 
 static Eigen::Vector3d randomPhi(std::mt19937& rng, int i) {
@@ -95,7 +155,7 @@ static Eigen::Vector3d randomPhi(std::mt19937& rng, int i) {
 }
 
 // ---------------- exp / log ----------------
-static bool testExpLog(std::mt19937& rng) {
+static bool testExpLogSO3(std::mt19937& rng) {
     const int N = 10000;
     const double tol = 1e-12;
     const double piMargin = 1e-3;   // vector comparisons only valid away from theta = pi
@@ -139,7 +199,7 @@ static bool testExpLog(std::mt19937& rng) {
 }
 
 // ---------------- log edge cases ----------------
-static bool testLogEdgeCases() {
+static bool testLogEdgeCasesSO3() {
     const double tol = 1e-12;
     double worstEdge = 0.0;
     const double edgeAngles[] = {0.0, 1e-10, M_PI - 1e-6, M_PI};
@@ -160,7 +220,7 @@ static bool testLogEdgeCases() {
 static bool testJacobians(std::mt19937& rng) {
     const int N = 2000;
     const double eps = 1e-6;       // finite-difference step
-    const double tolFD = 1e-8;     // FD error ~ rounding/eps ~ 1e-10
+    const double tolFD = 1e-9;     // FD error ~ rounding/eps ~ 1e-10
     const double tolExact = 1e-12;
 
     double worstLeft = 0, worstRight = 0, worstTranspose = 0,
@@ -202,15 +262,167 @@ static bool testJacobians(std::mt19937& rng) {
         && worstTranspose < tolExact && worstNeg < tolExact && worstFixed < tolExact;
 }
 
+static bool testJacobianInverses(std::mt19937& rng) {
+    const int N = 5000;
+    const double tol = 1e-12;
+    double worstLeftInv = 0, worstRightInv = 0, worstFixed = 0, worstTranspose = 0;
+
+    for (int n = 0; n < N; ++n) {
+        const Eigen::Vector3d phi = randomPhi(rng, n);
+        const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
+
+        const Eigen::Matrix3d Jl = leftJacobian(phi);
+        const Eigen::Matrix3d Jli = leftJacobianInverse(phi);
+        const Eigen::Matrix3d Jr = rightJacobian(phi);
+        const Eigen::Matrix3d Jri = rightJacobianInverse(phi);
+
+        worstLeftInv  = std::max(worstLeftInv,  (Jl * Jli - I).cwiseAbs().maxCoeff());
+        worstRightInv = std::max(worstRightInv, (Jr * Jri - I).cwiseAbs().maxCoeff());
+        worstFixed    = std::max(worstFixed,    (Jli * phi - phi).cwiseAbs().maxCoeff());
+        worstTranspose = std::max(worstTranspose, (Jri - Jli.transpose()).cwiseAbs().maxCoeff());
+    }
+
+    std::cout << "|J_l J_l^-1 - I|:         " << worstLeftInv   << "\n"
+              << "|J_r J_r^-1 - I|:         " << worstRightInv  << "\n"
+              << "|J_l^-1 phi - phi|:       " << worstFixed     << "\n"
+              << "|J_r^-1 - (J_l^-1)^T|:    " << worstTranspose << "\n";
+
+    return worstLeftInv < tol && worstRightInv < tol && worstFixed < tol && worstTranspose < tol;
+}
+
+// ---------------- SE(3) helpers ----------------
+// xi = [rho; phi]. Random translation (Gaussian, scaled) + random rotation vector.
+static Vector6d randomXi(std::mt19937& rng, int i, double rhoScale = 5.0) {
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    Vector6d xi;
+    xi.head<3>() = rhoScale * Eigen::Vector3d(gauss(rng), gauss(rng), gauss(rng));
+    xi.tail<3>() = randomPhi(rng, i);
+    return xi;
+}
+
+// Reference for the translation part of exp(xi): t = V(phi) * rho, with
+//   V = I + c1 [phi]x + c2 [phi]x^2.
+// For small angles the Taylor series of c1, c2 is accurate (no cancellation);
+// otherwise fall back to Sophus as an independent implementation.
+// (Sophus's own SE3::exp loses precision for theta ~ 1e-10..1e-5 because of
+// cancellation in 1 - cos(theta), so it is NOT a valid reference there.)
+static Eigen::Vector3d referenceTranslation(const Eigen::Vector3d& rho,
+                                            const Eigen::Vector3d& phi,
+                                            const Vector6d& xi) {
+    const double th = phi.norm();
+    if (th < 1e-2) {
+        const double t2 = th * th;
+        const double c1 = 0.5 - t2 / 24.0 + t2 * t2 / 720.0;
+        const double c2 = 1.0 / 6.0 - t2 / 120.0 + t2 * t2 / 5040.0;
+        const Eigen::Vector3d p1 = phi.cross(rho);
+        return rho + c1 * p1 + c2 * phi.cross(p1);
+    }
+    return Sophus::SE3d::exp(xi).translation();
+}
+
+// ---------------- SE(3) exp / log ----------------
+static bool testExpLogSE3(std::mt19937& rng) {
+    const int N = 10000;
+    const double tol = 1e-11;       // looser than SO(3): translations are O(10)
+    const double piMargin = 1e-3;   // vector comparisons only valid away from theta = pi
+
+    double worstRot = 0.0, worstTrans = 0.0, worstLastRow = 0.0;
+    double worstRoundTrip = 0.0, worstLogSophus = 0.0, worstRecon = 0.0;
+
+    for (int i = 0; i < N; ++i) {
+        const Vector6d xi = randomXi(rng, i);
+        const double theta = xi.tail<3>().norm();
+
+        // exp
+        const Eigen::Matrix4d T = expSE3(xi);
+        const Eigen::Matrix3d R_sophus = Sophus::SO3d::exp(xi.tail<3>()).matrix();
+        worstRot   = std::max(worstRot,
+            (T.topLeftCorner<3, 3>() - R_sophus).cwiseAbs().maxCoeff());
+        worstTrans = std::max(worstTrans,
+            (T.topRightCorner<3, 1>()
+             - referenceTranslation(xi.head<3>(), xi.tail<3>(), xi)).cwiseAbs().maxCoeff());
+        worstLastRow = std::max(worstLastRow,
+            (T.bottomRows<1>() - Eigen::RowVector4d(0, 0, 0, 1)).cwiseAbs().maxCoeff());
+
+        // log
+        const Vector6d xi_log = logSE3(T);
+        worstRecon = std::max(worstRecon, (expSE3(xi_log) - T).cwiseAbs().maxCoeff());
+
+        if (theta < M_PI - piMargin) {
+            worstRoundTrip = std::max(worstRoundTrip, (xi_log - xi).cwiseAbs().maxCoeff());
+            const Sophus::SE3d S(Sophus::SO3d(Eigen::Matrix3d(T.topLeftCorner<3, 3>())),
+                                 Eigen::Vector3d(T.topRightCorner<3, 1>()));
+            const Vector6d xi_sophus = S.log();
+            worstLogSophus = std::max(worstLogSophus,
+                (xi_log - xi_sophus).cwiseAbs().maxCoeff());
+        }
+    }
+
+    std::cout << "SE3 exp: worst rotation error:     " << worstRot       << "\n"
+              << "SE3 exp: worst translation error:  " << worstTrans     << "\n"
+              << "SE3 exp: worst bottom-row error:   " << worstLastRow   << "\n"
+              << "SE3 log: worst round trip |xi|:    " << worstRoundTrip << "\n"
+              << "SE3 log: worst |log - log_sophus|: " << worstLogSophus << "\n"
+              << "SE3 log: worst |exp(log(T)) - T|:  " << worstRecon     << "\n";
+
+    return worstRot < tol && worstTrans < tol && worstLastRow == 0.0
+        && worstRoundTrip < tol && worstLogSophus < tol && worstRecon < tol;
+}
+
+// ---------------- SE(3) log edge cases ----------------
+static bool testLogEdgeCasesSE3() {
+    const double tol = 1e-11;
+    double worstRecon = 0.0;
+
+    const double edgeAngles[] = {0.0, 1e-10, M_PI - 1e-6, M_PI};
+    const Eigen::Vector3d rhos[] = {
+        Eigen::Vector3d(0.0, 0.0, 0.0),
+        Eigen::Vector3d(1.0, 2.0, 3.0),
+        Eigen::Vector3d(-4.0, 0.5, 7.0),
+        Eigen::Vector3d(100.0, -50.0, 25.0)};
+
+    for (int ax = 0; ax < 3; ++ax) {
+        for (double th : edgeAngles) {
+            for (const Eigen::Vector3d& rho : rhos) {
+                Vector6d xi = Vector6d::Zero();
+                xi.head<3>() = rho;
+                xi(3 + ax) = th;
+                const Eigen::Matrix4d T = expSE3(xi);
+                const Eigen::Matrix4d Trec = expSE3(logSE3(T));
+                // Compare transforms, not xi: at theta = pi the sign of phi is ambiguous.
+                worstRecon = std::max(worstRecon, (T - Trec).cwiseAbs().maxCoeff());
+            }
+        }
+    }
+
+    // Pure translation: log must return exactly [t; 0].
+    double worstPure = 0.0;
+    for (const Eigen::Vector3d& t : rhos) {
+        Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+        T.topRightCorner<3, 1>() = t;
+        Vector6d expected;
+        expected << t, Eigen::Vector3d::Zero();
+        worstPure = std::max(worstPure, (logSE3(T) - expected).cwiseAbs().maxCoeff());
+    }
+
+    std::cout << "SE3 log: worst edge-case recon:    " << worstRecon << "\n"
+              << "SE3 log: worst pure-translation:   " << worstPure  << "\n";
+
+    return worstRecon < tol && worstPure < tol;
+}
+
 int main() {
     std::mt19937 rng(42);
 
     // Run every group (no short-circuiting) so one failure doesn't hide another.
     bool ok = true;
-    ok &= testExpLog(rng);
-    ok &= testLogEdgeCases();
+    ok &= testExpLogSO3(rng);
+    ok &= testLogEdgeCasesSO3();
     ok &= testJacobians(rng);
-
+    ok &= testJacobianInverses(rng);
+    ok &= testExpLogSE3(rng);
+    ok &= testLogEdgeCasesSE3();
+    
     std::cout << (ok ? "PASS" : "FAIL") << std::endl;
     return ok ? 0 : 1;
 }
