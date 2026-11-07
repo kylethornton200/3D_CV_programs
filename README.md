@@ -11,6 +11,10 @@ These are one off programs that helped me understand 3D CV as well as implementa
 │   ├── output/
 ├── cam_projection_visualizer/
 │   ├── main.cpp 
+├── ekf_attempt/
+│   ├── lie_ekf_examples.cpp
+│   ├── user_lie.hpp
+│   ├── CmakeLists.txt
 ├── sophus_attempt/
 │   ├── main.cpp
 │   ├── CmakeLists.txt
@@ -77,3 +81,23 @@ cmake -S sophus_attempt -B sophus_attempt/build
 cmake --build sophus_attempt/build
 ```
 
+
+### EKF Attempt (Lie group EKF on SO(3) / SE(3))
+Extended Kalman filters that live on the group instead of a vector space, built on the Lie functions from the Sophus attempt. Only needs Eigen.
+
+Conventions follow Barfoot: the state is `C_vi` / `T_vi` (world to vehicle), perturbations are on the left (`T = exp(dxi^) * T̄`), and twists are `xi = [rho; phi]`.
+
+#### Files
+* `user_lie.hpp`: the SO(3)/SE(3) functions from `sophus_attempt` (`hat`, `expSO3`/`logSO3`, Jacobians, `expSE3`/`logSE3`, `adjointSE3`) turned into a header. The math is unchanged.
+* `lie_ekf_examples.cpp`: the extra pieces an EKF needs (`hatSE3`, the `odot` operator, `invSE3`, a generic `ekfGain`) and two worked examples.
+
+#### Examples
+1. **Identity checks**: `hatSE3(xi) p = odot(p) xi` and `T exp(x^) = exp((Ad(T) x)^) T` over 1000 random samples.
+2. **SO(3) attitude EKF**: a gyro predicts a 90° yaw (with a small bias against the truth), so `F = Ad(Psi) = Psi`. The correction uses known world "up" and "north" vectors seen in the body frame, with `G = [-(C u)^; -(C m)^]`. The update is applied on the group (`C = exp(dphi^) C̃`). Prints the attitude error before and after the correction, the sigmas, and an orthogonality check.
+3. **SE(3) pose EKF (planar case)**: odometry drives 2 m forward and turns 90° left, so `F = Ad(Xi)`. One known landmark is measured in the vehicle frame, with `G = Dᵀ (T̃ p)^odot`. Prints the correction `dxi`, the robot's pose in the world, the planar sigmas, and an orthogonality check.
+
+#### Building
+```
+cmake -S ekf_attempt -B ekf_attempt/build
+cmake --build ekf_attempt/build
+```
