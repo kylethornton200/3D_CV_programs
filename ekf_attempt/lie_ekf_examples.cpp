@@ -40,7 +40,9 @@ void ekfGain(const Eigen::Matrix<double, N, N>& Pc, const Eigen::Matrix<double, 
              Eigen::Matrix<double, N, N>& Ph) {
     const Eigen::Matrix<double, M, M> S = G * Pc * G.transpose() + R;
     K  = Pc * G.transpose() * S.inverse();
-    Ph = (Eigen::Matrix<double, N, N>::Identity() - K * G) * Pc;
+    // Joseph form: stays symmetric and positive definite under rounding
+    const Eigen::Matrix<double, N, N> IKG = Eigen::Matrix<double, N, N>::Identity() - K * G;
+    Ph = IKG * Pc * IKG.transpose() + K * R * K.transpose();
 }
 
 // ======================= Example 1: SO(3) attitude EKF =======================
