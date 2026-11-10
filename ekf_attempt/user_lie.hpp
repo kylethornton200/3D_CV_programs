@@ -108,6 +108,28 @@ inline Matrix6d adjointSE3(const Eigen::Matrix4d& T){
     return adjT;
 }
 
+Matrix6d leftJacobianSE3(const Vector6d& xi) {
+    const Eigen::Vector3d rho = xi.head<3>(), phi = xi.tail<3>();
+    const double t = phi.norm();
+    const Eigen::Matrix3d Rh = hat(rho), Ph = hat(phi);
+    Eigen::Matrix3d Q;
+    if (t < 1e-6) {
+        Q = 0.5 * Rh + (1.0 / 6.0) * (Ph * Rh + Rh * Ph);
+    } else {
+        const double t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t;
+        Q = 0.5 * Rh
+          + (t - std::sin(t)) / t3 * (Ph * Rh + Rh * Ph + Ph * Rh * Ph)
+          + (t2 + 2 * std::cos(t) - 2) / (2 * t4) * (Ph * Ph * Rh + Rh * Ph * Ph - 3 * Ph * Rh * Ph)
+          + (2 * t - 3 * std::sin(t) + t * std::cos(t)) / (2 * t5) * (Ph * Rh * Ph * Ph + Ph * Ph * Rh * Ph);
+    }
+    Matrix6d J = Matrix6d::Zero();
+    J.topLeftCorner<3, 3>() = leftJacobian(phi);
+    J.bottomRightCorner<3, 3>() = J.topLeftCorner<3, 3>();
+    J.topRightCorner<3, 3>() = Q;
+    return J;
+}
+
+
 inline Eigen::Vector3d randomPhi(std::mt19937& rng, int i) {
     std::normal_distribution<double> gauss(0.0, 1.0);
     std::uniform_real_distribution<double> angleDist(0.0, M_PI);

@@ -1,4 +1,4 @@
-// Lie group EKF examples (SO(3) attitude, SE(3) pose) built on user_lie.hpp.
+// Lie group EKF/IEKF examples (SO(3) attitude, SE(3) pose) built on user_lie.hpp.
 // Barfoot conventions: state is C_vi / T_vi (world -> vehicle), LEFT perturbations,
 // xi = [rho; phi]. Build:
 //   g++ -std=c++17 -O2 -I/usr/include/eigen3 lie_ekf_examples.cpp -o lie_ekf_examples
@@ -122,19 +122,37 @@ void se3Example() {
     const Matrix6d F = adjointSE3(Xi);
     const Matrix6d P_check = F * P * F.transpose() + Q;
 
-    // ---- correct ----
-    const Eigen::Vector4d q = T_check * p;
-    const Eigen::Matrix<double, 3, 6> G = DT * odot(q);
-    Eigen::Matrix<double, 6, 3> K; Matrix6d P_hat;
-    ekfGain<6, 3>(P_check, G, R, K, P_hat);
-    const Vector6d dxi = K * (y - DT * q);
-    T_hat = expSE3(dxi) * T_check;
+    // ---- correct (IEKF) ----
+    // Work in the chart centred on the prior: T = exp(xi^) T_check, xi ~ N(0, P_check).
+    // This is the vector IEKF (4.45) with x_check = 0 and x_op = xi_op.
+    Vector6d xi_op = Vector6d::Zero();                   // first pass == EKF
+    Vector6d dxi;
+    Eigen::Matrix<double, 3, 6> G;
+    Eigen::Matrix<double, 6, 3> K;
+    Matrix6d P_hat;
+    const int max_iters = 20;
+    for (int it = 0; it < max_iters; ++it) {
+        const M4 T_op = expSE3(xi_op) * T_check;          // current operating point
+        const Eigen::Vector4d q = T_op * p;              // relinearise at T_op, not T_check
+        const Eigen::Vector3d y_op = DT * q;
+        G = DT * odot(q) * leftJacobianSE3(xi_op);       // d y / d xi at xi_op
+        ekfGain<6, 3>(P_check, G, R, K, P_hat);          // P_check stays frozen
+        dxi = K * (y - y_op + G * xi_op);                // (4.45c): -G (x_check - x_op) = +G xi_op
+        const double step = (dxi - xi_op).norm();
+        xi_op = dxi;
+        if (step < 1e-10) break;
+    }
+    T_hat = expSE3(dxi) * T_check;                       // anchored at the prior, not at T_op
+    // P_hat is from the final linearisation. It describes xi about T_check; to express it as a
+    // left perturbation about T_hat, use J P J^T with J = leftJacobianSE3(dxi) (small change here).
+    const Matrix6d Jh = leftJacobianSE3(dxi);
+    P_hat = Jh * P_hat * Jh.transpose();
 
     const M4 T_iv = invSE3(T_hat);
     const double heading = std::atan2(T_iv(1, 0), T_iv(0, 0)) * 180 / M_PI;
     std::printf("dxi = [rho %.4f %.4f %.4f | phi %.4f %.4f %.4f]\n",
                 dxi(0), dxi(1), dxi(2), dxi(3), dxi(4), dxi(5));
-    std::printf("robot in world: x=%.3f  y=%.3f  z=%.3f  heading=%.2f deg\n",
+    std::printf("robot in world for IEKF: x=%.3f  y=%.3f  z=%.3f  heading=%.2f deg\n",
                 T_iv(0, 3), T_iv(1, 3), T_iv(2, 3), heading);
     std::printf("planar sigmas after: rho1=%.3f rho2=%.3f phi3=%.3f\n",
                 std::sqrt(P_hat(0,0)), std::sqrt(P_hat(1,1)), std::sqrt(P_hat(5,5)));
